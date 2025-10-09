@@ -29,7 +29,7 @@ services:
   mongodb:
     image: mongo:${MONGODB_VERSION:-6.0.8}
     container_name: gio_apim_mongodb
-    restart: always
+    restart: no
     volumes:
       - data-mongo:/data/db
     networks:
@@ -38,7 +38,7 @@ services:
   elasticsearch:
     image: docker.elastic.co/elasticsearch/elasticsearch:${ELASTIC_VERSION:-8.8.1}
     container_name: gio_apim_elasticsearch
-    restart: always
+    restart: no
     volumes:
       - data-elasticsearch:/usr/share/elasticsearch/data
     environment:
@@ -60,7 +60,7 @@ services:
   gateway:
     image: graviteeio/apim-gateway:${APIM_VERSION:-4}
     container_name: gio_apim_gateway
-    restart: always
+    restart: no
     ports:
       - "8082:8082"
     depends_on:
@@ -70,6 +70,8 @@ services:
       - gravitee_management_mongodb_uri=mongodb://mongodb:27017/gravitee?serverSelectionTimeoutMS=5000&connectTimeoutMS=5000&socketTimeoutMS=5000
       - gravitee_ratelimit_mongodb_uri=mongodb://mongodb:27017/gravitee?serverSelectionTimeoutMS=5000&connectTimeoutMS=5000&socketTimeoutMS=5000
       - gravitee_reporters_elasticsearch_endpoints_0=http://elasticsearch:9200
+    volumes:
+      - ./gravitee/license.key:/opt/graviteeio-gateway/license/license.key
     networks:
       - storage
       - frontend
@@ -77,7 +79,7 @@ services:
   management_api:
     image: graviteeio/apim-management-api:${APIM_VERSION:-4}
     container_name: gio_apim_management_api
-    restart: always
+    restart: no
     ports:
       - "8083:8083"
     links:
@@ -90,7 +92,8 @@ services:
       - gravitee_management_mongodb_uri=mongodb://mongodb:27017/gravitee?serverSelectionTimeoutMS=5000&connectTimeoutMS=5000&socketTimeoutMS=5000
       - gravitee_analytics_elasticsearch_endpoints_0=http://elasticsearch:9200
       - gravitee_installation_standalone_portal_url=http://localhost:8085
-      - /gravitee/license.key:/opt/graviteeio-gateway/license/license.key
+    volumes:
+      - ./gravitee/license.key:/opt/graviteeio-management-api/license/license.key
     networks:
       - storage
       - frontend
@@ -98,7 +101,7 @@ services:
   management_ui:
     image: graviteeio/apim-management-ui:${APIM_VERSION:-4}
     container_name: gio_apim_management_ui
-    restart: always
+    restart: no
     ports:
       - "8084:8080"
     depends_on:
@@ -111,7 +114,7 @@ services:
   portal_ui:
     image: graviteeio/apim-portal-ui:${APIM_VERSION:-4}
     container_name: gio_apim_portal_ui
-    restart: always
+    restart: no
     ports:
       - "8085:8080"
     depends_on:
