@@ -1,0 +1,333 @@
+version: '3.5'
+
+networks:
+  frontend:
+    name: frontend
+  storage:
+    name: storage
+
+services:
+  traefik:
+    image: traefik:v1.7
+    container_name: gio_trafik
+
+    command: --api --docker
+    ports:
+      # only expose https to outside world
+      - "443:443"   # SSL
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./traefik/config/traefik.toml:/etc/traefik/traefik.toml
+      - ./traefik/certs/:/certs/
+    labels:
+      - "traefik.enable=true"
+    depends_on:
+      - apim_gateway
+      - apim_console
+      - apim_portal
+      - apim_management
+      - am_gateway
+#      - am_gatewaytwo
+      - am_management
+      - am_console
+    networks:
+      frontend:
+        aliases:
+          - am.gravitee.io
+
+  mongodb:
+    image: mongo:${MONGODB_VERSION:-7.0.2}
+    restart: always
+    container_name: gio_mongodb
+
+    environment:
+      - MONGO_INITDB_DATABASE=gravitee
+    labels:
+      - "traefik.enable=false"
+    volumes:
+#      - ./mongo/docker-entrypoint-initdb.d:/docker-entrypoint-initdb.d
+#      - ./mongo/dump:/home/dump
+      - ./data/mongo:/data/db
+      - ./logs/mongodb:/var/log/mongodb
+    networks:
+      - storage
+    ports: 
+      - "27017:27017"
+    healthcheck:
+      test: ["CMD","mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 5s
+      timeout: 5s
+      retries: 3
+      start_period: 5s   
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:${ELASTIC_VERSION:-8.7.1}
+    container_name: gio_apim_elasticsearch
+    restart: always
+    environment:
+      - http.host=0.0.0.0
+      - transport.host=0.0.0.0
+      - xpack.security.enabled=false
+#      - xpack.monitoring.enabled=false
+      - cluster.name=elasticsearch
+      - discovery.type=single-node
+    ulimits:
+      nofile: 65536
+    labels:
+      - "traefik.enable=false"
+    volumes:
+      - ./data/elasticsearch:/usr/share/elasticsearch/data
+    networks:
+      - storage
+    ports: 
+      - "9200:9200"  
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:9200/_cat/health?h=st" ]
+      interval: 30s
+      timeout: 10s
+      retries: 5  
+
+
+  apim_management:
+    image: graviteeio/apim-management-api:${APIM_VERSION:-3}
+    container_name: gio_apim_management_api  
+    restart: always
+    environment:
+      - gravitee_management_mongodb_uri=mongodb://mongodb:27017/gravitee?serverSelectionTimeoutMS=10000&connectTimeoutMS=10000&socketTimeoutMS=10000
+#      - gravitee_ratelimit_mongodb_uri=mongodb://mongodb:27017/gravitee?serverSelectionTimeoutMS=10000&connectTimeoutMS=10000&socketTimeoutMS=10000
+      - gravitee_analytics_elasticsearch_endpoints_0=http://elasticsearch:9200
+      - gravitee_jwt_cookiepath=/api
+      - gravitee_jwt_cookiesecure=true
+      - gravitee_jwt_cookiedomain=apim.gravitee.io
+#      - gravitee_api_jupiterMode_enabled=true
+      - gravitee_email_enabled=true
+      - gravitee_email_host=smtp.gmail.com
+      - gravitee_email_subject="[Gravitee.io] %s"
+      - gravitee_email_port=587
+      - gravitee_email_from=leeroyjenkinstestmail@gmail.com
+      - gravitee_email_username=leeroyjenkinstestmail@gmail.com
+      - gravitee_email_password=iclndkdsvunjtgss
+      - gravitee_email_properties_auth=true
+      - gravitee_email_properties_starttls_enable=true
+      - gravitee_email_properties_ssl_trust=smtp.gmail.com
+      - gravitee_email_properties_ssl_protocols=TLSv1.2
+#      - gravitee_installation_api_proxyPath_management=/apim/api/management
+#      - gravitee_installation_api_proxyPath_portal=/apim/api/portal
+      - gravitee_installation_api_proxyPath_management=/api/management
+      - gravitee_installation_api_proxyPath_portal=/api/portal
+      - gravitee_installation_api_url=https://apim.gravitee.io
+#      - gravitee_portal_url=/apim/portal
+    volumes:
+      - ./certs/cacerts:/etc/ssl/certs/java/cacerts
+      - ./certs/cacerts:/opt/java/openjdk/lib/security/cacerts
+      - ./logs/apim-management-api:/opt/graviteeio-management-api/logs   
+      - ./license/license.key:/opt/graviteeio-management-api/license/license.key      
+    labels:
+      - "traefik.frontend.rule=Host:apim.gravitee.io;PathPrefixStrip:/api"
+      - "traefik.backend=graviteeio-apim-management"
+      - "traefik.port=8083"
+      - "traefik.docker.network=frontend"
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+    networks:
+      - storage
+      - frontend
+    user: root
+
+
+  apim_gateway:
+    image: graviteeio/apim-gateway:${APIM_VERSION:-3}
+    container_name: gio_apim_gateway
+    restart: always
+    environment:
+      - gravitee_management_mongodb_uri=mongodb://mongodb:27017/gravitee?serverSelectionTimeoutMS=10000&connectTimeoutMS=10000&socketTimeoutMS=10000
+#      - gravitee_ratelimit_mongodb_uri=mongodb://mongodb:27017/gravitee?serverSelectionTimeoutMS=10000&connectTimeoutMS=10000&socketTimeoutMS=10000
+      - gravitee_reporters_elasticsearch_endpoints_0=http://elasticsearch:9200
+      # - gravitee_http_maxFormAttributeSize=2048
+#      - gravitee_api_jupiterMode_enabled=true
+    volumes:
+      - ./certs/cacerts:/opt/java/openjdk/lib/security/cacerts
+      - ./logs/apim-gateway:/opt/graviteeio-gateway/logs
+      - ./license/license.key:/opt/graviteeio-gateway/license/license.key
+    ports:
+      - "8082:8082"
+    labels:
+      - "traefik.frontend.rule=Host:apim.gravitee.io"
+      - "traefik.backend=graviteeio-apim-gateway"
+      - "traefik.port=8082"
+      - "traefik.docker.network=frontend"
+    depends_on:
+      - mongodb
+      - elasticsearch
+      - apim_management
+    networks:
+      - storage
+      - frontend
+    user: root
+
+  apim_console:
+    image: graviteeio/apim-management-ui:${APIM_VERSION:-3}
+    container_name: gio_apim_management_ui
+    restart: always
+    environment:
+      - MGMT_API_URL=https://apim.gravitee.io/api/management/organizations/DEFAULT/environments/DEFAULT/
+      - CONSOLE_BASE_HREF=/console/
+    volumes:
+      - ./certs/cacerts:/opt/java/openjdk/lib/security/cacerts
+      - ./logs/apim_console:/var/log/nginx
+    labels:
+      - "traefik.frontend.redirect.regex=^https://apim.gravitee.io/console$$"
+      - "traefik.frontend.redirect.replacement=https://apim.gravitee.io/console/"
+      - "traefik.frontend.redirect.permanent=true"
+      - "traefik.port=8080"
+      # Warn: do not use PathPrefixStrip cause it not works well with redirect (https://github.com/containous/traefik/issues/1957#issuecomment-359369625)
+      - "traefik.frontend.rule=Host:apim.gravitee.io;PathPrefix:/console;ReplacePathRegex: ^/console/(.*) /$$1"
+      - "traefik.docker.network=frontend"
+    depends_on:
+      - apim_management
+    networks:
+      - frontend
+    user: root
+
+  apim_portal:
+    image: graviteeio/apim-portal-ui:${APIM_VERSION:-3}
+    container_name: gio_apim_portal_ui
+    restart: always
+    environment:
+      - PORTAL_BASE_HREF=/portal/
+      - PORTAL_API_URL=https://apim.gravitee.io/api/portal/environments/DEFAULT
+    volumes:
+      - ./certs/cacerts:/opt/java/openjdk/lib/security/cacerts
+      - ./logs/apim_portal:/var/log/nginx
+    labels:
+      - "traefik.frontend.redirect.regex=^https://apim.gravitee.io/portal$$"
+      - "traefik.frontend.redirect.replacement=https://apim.gravitee.io/portal/"
+      - "traefik.frontend.redirect.permanent=true"
+      - "traefik.port=8080"
+      - "traefik.frontend.rule=Host:apim.gravitee.io;PathPrefix:/portal;ReplacePathRegex: ^/portal/(.*) /$$1"
+      - "traefik.docker.network=frontend"
+    depends_on:
+      - apim_management
+    networks:
+      - frontend
+    user: root
+
+
+  am_management:
+    image: graviteeio/am-management-api:${AM_VERSION:-3}
+    container_name: gio_am_management_api
+    restart: always
+    environment:
+      - gravitee_management_mongodb_uri=mongodb://mongodb:27017/gravitee-am?serverSelectionTimeoutMS=10000&connectTimeoutMS=10000&socketTimeoutMS=10000
+      - gravitee_oauth2_mongodb_uri=mongodb://mongodb:27017/gravitee-am?serverSelectionTimeoutMS=10000&connectTimeoutMS=10000&socketTimeoutMS=10000
+      - gravitee_jwt_cookiepath=/
+      - gravitee_jwt_cookiesecure=true
+      - gravitee_jwt_cookiedomain=am.gravitee.io
+      - gravitee_email_enabled=true
+      - gravitee_email_host=smtp.gmail.com
+      - gravitee_email_subject="[Gravitee.io] %s"
+      - gravitee_email_port=587
+      - gravitee_email_from=leeroyjenkinstestmail@gmail.com
+      - gravitee_email_username=leeroyjenkinstestmail@gmail.com
+      - gravitee_email_password=iclndkdsvunjtgss
+      - gravitee_email_properties_auth=true
+      - gravitee_email_properties_starttls_enable=true
+      - gravitee_email_properties_ssl_trust=smtp.gmail.com
+      - gravitee_email_properties_ssl_protocols=TLSv1.2
+    volumes:
+      - ./certs/cacerts:/opt/java/openjdk/lib/security/cacerts
+      - ./logs/am_management:/opt/graviteeio-am-management-api/logs
+      - ./license/license.key:/opt/graviteeio-am-management-api/license/license.key
+    labels:
+      - "traefik.backend=graviteeio-am-managementapi"
+      - "traefik.frontend.rule=Host:am.gravitee.io;PathPrefix:/management,/admin"
+      - "traefik.port=8093"
+      - "traefik.docker.network=frontend"
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    networks:
+      - storage
+      - frontend
+
+  am_gateway:
+    image: graviteeio/am-gateway:${AM_VERSION:-3}
+    container_name: gio_am_gateway
+    restart: always
+    ports:
+      - "8092:8092"
+    environment:
+      - gravitee_management_mongodb_uri=mongodb://mongodb:27017/gravitee-am?serverSelectionTimeoutMS=10000&connectTimeoutMS=10000&socketTimeoutMS=10000
+      - gravitee_oauth2_mongodb_uri=mongodb://mongodb:27017/gravitee-am?serverSelectionTimeoutMS=10000&connectTimeoutMS=10000&socketTimeoutMS=10000
+      - services.metrics.enabled=true
+      - gravitee_email_enabled=true
+      - gravitee_email_host=smtp.gmail.com
+      - gravitee_email_subject="[Gravitee.io] %s"
+      - gravitee_email_port=587
+      - gravitee_email_from=leeroyjenkinstestmail@gmail.com
+      - gravitee_email_username=leeroyjenkinstestmail@gmail.com
+      - gravitee_email_password=iclndkdsvunjtgss
+      - gravitee_email_properties_auth=true
+      - gravitee_email_properties_starttls_enable=true
+      - gravitee_email_properties_ssl_trust=smtp.gmail.com
+      - gravitee_email_properties_ssl_protocols=TLSv1.2
+      # - gravitee_http_maxFormAttributeSize=4096
+    volumes:
+#      - ./certs/cacerts:/etc/ssl/certs/java/cacerts -> OLD CONFIG
+      - ./certs/cacerts:/opt/java/openjdk/lib/security/cacerts
+      - ./logs/am-gateway:/opt/graviteeio-am-gateway/logs
+      - ./license/license.key:/opt/graviteeio-am-gateway/license/license.key
+    labels:
+      - "traefik.backend=graviteeio-am-gateway"
+      - "traefik.frontend.rule=Host:am.gravitee.io;PathPrefixStrip:/auth"
+      - "traefik.port=8092"
+      - "traefik.docker.network=frontend"
+    depends_on:
+      - mongodb
+      - am_management
+    networks:
+      - storage
+      - frontend
+
+#  # am_gatewaytwo:
+#    # image: graviteeio/am-gateway:${AM_VERSION:-3}
+#    # restart: always
+#    # ports:
+#       # - "8097:8092"
+#    # environment:
+#      # - gravitee_management_mongodb_uri=mongodb://mongodb:27017/gravitee-am?serverSelectionTimeoutMS=10000&connectTimeoutMS=10000&socketTimeoutMS=10000
+#      # - gravitee_oauth2_mongodb_uri=mongodb://mongodb:27017/gravitee-am?serverSelectionTimeoutMS=10000&connectTimeoutMS=10000&socketTimeoutMS=10000
+#    # volumes:
+#      # - ./certs/cacerts:/etc/ssl/certs/java/cacerts -> STAR CONFIG
+#      # - ./certs/cacerts:/opt/java/openjdk/lib/security/cacerts
+#      # - ./logs/am-gatewaytwo:/opt/graviteeio-am-gateway/logs   
+#    # labels:
+#      # - "traefik.backend=graviteeio-am-gateway"
+#      # - "traefik.frontend.rule=Host:am.gravitee.io;PathPrefixStrip:/auth"
+#       # - "traefik.port=8097"
+#       # - "traefik.docker.network=frontend"
+#     # depends_on:
+#       # - mongodb
+#     # networks:
+#       # - storage
+#       # - frontend
+
+  am_console:
+    image: graviteeio/am-management-ui:${AM_VERSION:-3}
+    container_name: gio_am_console
+    restart: always
+    environment:
+      - MGMT_API_URL=https:\/\/am.gravitee.io${AM_MGT_API_BASE:-}
+      - MGMT_UI_URL=https:\/\/am.gravitee.io
+    labels:
+      - "traefik.backend=graviteeio-am-managementui"
+      - "traefik.frontend.rule=Host:am.gravitee.io"
+      - "traefik.docker.network=frontend"
+      - "traefik.port=8080"
+    depends_on:
+      - am_management
+    networks:
+      - frontend
