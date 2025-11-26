@@ -52,9 +52,9 @@ services:
     volumes:
       - ./logs/am-gateway:/opt/graviteeio-am-gateway/logs
     environment:
-      - gravitee_management_mongodb_uri=mongodb://mongodb:27017/graviteeam?serverSelectionTimeoutMS=5000&connectTimeoutMS=5000&socketTimeoutMS=5000
-      - gravitee_oauth2_mongodb_uri=mongodb://mongodb:27017/graviteeam?serverSelectionTimeoutMS=5000&connectTimeoutMS=5000&socketTimeoutMS=5000
-
+      - gravitee_repositories_management_mongodb_uri=mongodb://mongodb:27017/graviteeam?serverSelectionTimeoutMS=5000&connectTimeoutMS=5000&socketTimeoutMS=5000
+      - gravitee_repositories_oauth2_mongodb_uri=mongodb://mongodb:27017/graviteeam?serverSelectionTimeoutMS=5000&connectTimeoutMS=5000&socketTimeoutMS=5000
+    
   management:
     image: graviteeio/am-management-api:${GIO_AM_VERSION}
     container_name: gio_am_management
@@ -66,9 +66,14 @@ services:
     volumes:
       - ./logs/am-management-api:/opt/graviteeio-am-management-api/logs
     environment:
-      - gravitee_management_mongodb_uri=mongodb://mongodb:27017/graviteeam?serverSelectionTimeoutMS=5000&connectTimeoutMS=5000&socketTimeoutMS=5000
-      - gravitee_oauth2_mongodb_uri=mongodb://mongodb:27017/graviteeam?serverSelectionTimeoutMS=5000&connectTimeoutMS=5000&socketTimeoutMS=5000
+      # Repositorios de management & oauth2
+      - gravitee_repositories_management_mongodb_uri=mongodb://mongodb:27017/graviteeam?serverSelectionTimeoutMS=5000&connectTimeoutMS=5000&socketTimeoutMS=5000
+      - gravitee_repositories_oauth2_mongodb_uri=mongodb://mongodb:27017/graviteeam?serverSelectionTimeoutMS=5000&connectTimeoutMS=5000&socketTimeoutMS=5000
 
+      # DataPlane obligatorio desde 4.7
+      - gravitee_dataPlanes_0_id=default
+      - gravitee_dataPlanes_0_type=mongodb
+      - gravitee_dataPlanes_0_mongodb_uri=mongodb://mongodb:27017/graviteeam?serverSelectionTimeoutMS=5000&connectTimeoutMS=5000&socketTimeoutMS=5000
   webui:
     image: graviteeio/am-management-ui:${GIO_AM_VERSION}
     container_name: gio_am_webui
@@ -78,5 +83,7 @@ services:
     environment:
       - MGMT_API_URL=http://localhost:${NGINX_PORT}/am
       - MGMT_UI_URL=http://localhost:${NGINX_PORT}/am/ui
+      
+
     volumes:
       - ./logs/am-webui:/var/log/httpd
